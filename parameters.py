@@ -1,9 +1,6 @@
-def analyze_dca(financials):
-    """
-    คำนวณตัวชี้วัดทั้ง 11 ข้อจากข้อมูลงบการเงินที่ได้
-    :param fin: dict ที่ได้จาก get_financials()
-    :return: dict พร้อมค่าที่คำนวณแล้วและคะแนนแต่ละข้อ
-    """
+def analyze_dca(financials: dict) -> dict:
+    score = 0
+    parameters =[]
 
     if financials is None:
         return None
