@@ -1,5 +1,11 @@
 import yfinance as yf
 
+def safe_get_value(df, row_name):
+    try:
+        return df.loc[row_name].values[0]
+    except Exception:
+        return None
+
 def get_financials(ticker: str):
     """
     ดึงงบการเงินของหุ้นจาก yfinance
@@ -18,16 +24,17 @@ def get_financials(ticker: str):
 
     try:
         return {
-           'revenue': fin.loc['Total Revenue'].values[0],
-            'gross_profit': fin.loc['Gross Profit'].values[0],
-            'ebit': fin.loc['EBIT'].values[0],
-            'total_assets': bs.loc['Total Assets'].values[0],
-            'current_liabilities': bs.loc['Current Liabilities'].values[0],
-            'equity': bs.loc['Total Stockholder Equity'].values[0],
-            'liabilities': bs.loc['Total Liab'].values[0],
-            'operating_cf': cf.loc['Total Cash From Operating Activities'].values[0],
-            'capex': cf.loc['Capital Expenditures'].values[0],
-            'net_income': fin.loc['Net Income'].values[0]
+            'ticker': ticker,
+            'revenue': safe_get_value(fin, 'Total Revenue'),
+            'gross_profit': safe_get_value(fin, 'Gross Profit'),
+            'ebit': safe_get_value(fin, 'EBIT'),
+            'total_assets': safe_get_value(bs, 'Total Assets'),
+            'current_liabilities': safe_get_value(bs, 'Current Liabilities'),
+            'equity': safe_get_value(bs, 'Total Stockholder Equity'),
+            'liabilities': safe_get_value(bs, 'Total Liab'),
+            'operating_cf': safe_get_value(cf, 'Total Cash From Operating Activities'),
+            'capex': safe_get_value(cf, 'Capital Expenditures'),
+            'net_income': safe_get_value(fin, 'Net Income')
         }
     except Exception as e:
         print(f"❌ Missing key data for {ticker}: {e}")
