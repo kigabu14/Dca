@@ -1,46 +1,43 @@
+# streamlit_app.py
 import streamlit as st
-from get_financials import get_financials
-from evaluate_dca import calculate_dca_score
-import pandas as pd
+from dca.get_financials import get_financials
+from dca.parameters import analyze_dca
+from dca.visualization import plot_radar_chart, plot_pie_chart
 
-# UI config
-st.set_page_config(page_title="DCA Investment Analyzer", layout="wide")
-st.title("📈 DCA Investment Analyzer")
-st.markdown("วิเคราะห์หุ้นต่างประเทศตามหลัก Warren Buffett + DCA พร้อมคะแนนและคำแนะนำ")
+st.set_page_config(page_title="วิเคราะห์หุ้นแบบบัฟเฟตต์", layout="wide")
 
-# ช่องกรอกชื่อหุ้น
-tickers_input = st.text_input(
-    "กรอกชื่อหุ้นที่ต้องการวิเคราะห์ (เช่น AAPL, MSFT, NVDA, SPY)", 
-    value="AAPL, MSFT, NVDA"
+st.title("📈 วิเคราะห์หุ้นแบบ DCA ด้วยเกณฑ์ Warren Buffett")
+st.markdown("เลือกรายชื่อหุ้นที่ต้องการวิเคราะห์ แล้วระบบจะดึงข้อมูลและวิเคราะห์ให้อัตโนมัติ")
+
+# ✅ ตัวอย่างหุ้นเบื้องต้น
+default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "GOOGL", "AMZN"]
+
+tickers = st.multiselect(
+    "เลือกหุ้นที่ต้องการวิเคราะห์ (สามารถเลือกได้หลายตัว):",
+    default_stocks,
+    default=default_stocks[:3]
 )
 
-if st.button("วิเคราะห์เลย 🚀"):
-    tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+if st.button("🚀 เริ่มวิเคราะห์"):
+    col1, col2 = st.columns(2)
+    for ticker in tickers:
+        with st.spinner(f"📊 กำลังโหลดข้อมูลหุ้น {ticker}..."):
+            try:
+                financials = get_financials(ticker)
+                if not financials:
+                    st.error(f"❌ ไม่พบข้อมูลของ {ticker}")
+                    continue
+                score_data = analyze_dca(financials)
 
-    all_results = []
+                with col1:
+                    st.subheader(f"📌 {ticker} – สรุปคะแนน DCA")
+                    st.plotly_chart(plot_radar_chart(score_data, title=f"{ticker} - คะแนนรายเกณฑ์"), use_container_width=True)
 
-    with st.spinner("🔍 กำลังวิเคราะห์..."):
-        for t in tickers:
-            data = get_financials(t)
-            if data:
-                result = calculate_dca_score(data)
-                all_results.append(result)
-            else:
-                st.warning(f"⚠️ โหลดข้อมูลของ {t} ไม่สำเร็จ")
+                with col2:
+                    st.subheader(f"📊 {ticker} – สัดส่วนคะแนน")
+                    st.plotly_chart(plot_pie_chart(score_data), use_container_width=True)
 
-    if all_results:
-        # สร้างตาราง
-        df = pd.DataFrame([
-            {
-                "Ticker": r['ticker'],
-                "DCA Score": r['score'],
-                "สรุป": "✅ น่าลงทุน" if r['score'] >= 70 else "❌ ยังไม่ผ่าน",
-                "รายละเอียด": "\n".join(r['reasons'])
-            } for r in all_results
-        ])
+                st.divider()
 
-        st.success("✅ วิเคราะห์เสร็จแล้ว")
-        st.dataframe(df, use_container_width=True)
-
-        # เตรียมไว้ส่ง PDF ต่อ
-        st.session_state['dca_results'] = all_results
+            except Exception as e:
+                st.error(f"❌ เกิดข้อผิดพลาดกับหุ้น {ticker}: {e}")
