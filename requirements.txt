@@ -1,5 +1,5 @@
 streamlit
-yfinance
 pandas
+yfinance==0.2.37
 reportlab
 requests
