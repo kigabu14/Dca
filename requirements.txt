@@ -1,5 +1,6 @@
 streamlit
-pandas
+tk==0.1.0
+matplotlib==3.7.2
 yfinance==0.2.37
 reportlab
 requests
