@@ -1,8 +1,8 @@
 # streamlit_app.py
 import streamlit as st
-from dca.get_financials import get_financials
-from dca.parameters import analyze_dca
-from dca.visualization import plot_radar_chart, plot_pie_chart
+from get_financials import get_financials
+from parameters import analyze_dca
+from visualization import plot_radar_chart, plot_pie_chart
 
 st.set_page_config(page_title="วิเคราะห์หุ้นแบบบัฟเฟตต์", layout="wide")
 
