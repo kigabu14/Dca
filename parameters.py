@@ -139,18 +139,4 @@ def compute_parameters(fin):
 
     return parameters
     
-    def analyze_dca(financials: dict) -> dict:
-    score = 0
-    explanations = []
-
-    # ตัวอย่างเงื่อนไข:
-    if financials['net_income'] > 0:
-        score += 1
-        explanations.append("✅ มีกำไรสุทธิ")
-
-    # เพิ่มเกณฑ์อื่นๆ ตาม Buffett-style ได้ที่นี่...
-
-    return {
-        "score": score,
-        "explanations": explanations
-    }
+ 
