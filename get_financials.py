@@ -18,17 +18,16 @@ def get_financials(ticker: str):
 
     try:
         return {
-            'ticker': ticker,
-            'revenue': fin.loc['Total Revenue'][0],
-            'gross_profit': fin.loc['Gross Profit'][0],
-            'ebit': fin.loc['EBIT'][0],
-            'total_assets': bs.loc['Total Assets'][0],
-            'current_liabilities': bs.loc['Current Liabilities'][0],
-            'equity': bs.loc['Total Stockholder Equity'][0],
-            'liabilities': bs.loc['Total Liab'][0],
-            'operating_cf': cf.loc['Total Cash From Operating Activities'][0],
-            'capex': cf.loc['Capital Expenditures'][0],
-            'net_income': fin.loc['Net Income'][0]
+           'revenue': fin.loc['Total Revenue'].values[0],
+            'gross_profit': fin.loc['Gross Profit'].values[0],
+            'ebit': fin.loc['EBIT'].values[0],
+            'total_assets': bs.loc['Total Assets'].values[0],
+            'current_liabilities': bs.loc['Current Liabilities'].values[0],
+            'equity': bs.loc['Total Stockholder Equity'].values[0],
+            'liabilities': bs.loc['Total Liab'].values[0],
+            'operating_cf': cf.loc['Total Cash From Operating Activities'].values[0],
+            'capex': cf.loc['Capital Expenditures'].values[0],
+            'net_income': fin.loc['Net Income'].values[0]
         }
     except Exception as e:
         print(f"❌ Missing key data for {ticker}: {e}")
