@@ -1,4 +1,4 @@
-def compute_parameters(fin):
+def analyze_dca(fin):
     """
     คำนวณตัวชี้วัดทั้ง 11 ข้อจากข้อมูลงบการเงินที่ได้
     :param fin: dict ที่ได้จาก get_financials()
