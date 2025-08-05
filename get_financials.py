@@ -1,16 +1,14 @@
 import yfinance as yf
 
-def safe_get_value(df, row_name):
+def safe_get_value(df, key):
     try:
-        return df.loc[row_name].values[0]
-    except Exception:
+        return df.loc[key].iloc[0]
+    except:
         return None
 
 def get_financials(ticker: str):
     """
-    ดึงงบการเงินของหุ้นจาก yfinance
-    :param ticker: ชื่อหุ้น (เช่น 'AAPL')
-    :return: dict ของข้อมูลทางการเงินที่ใช้วิเคราะห์ DCA
+    ดึงข้อมูลทางการเงินของหุ้นจาก yfinance เพื่อนำไปวิเคราะห์ DCA
     """
     stock = yf.Ticker(ticker)
 
@@ -19,23 +17,23 @@ def get_financials(ticker: str):
         bs = stock.balance_sheet
         cf = stock.cashflow
     except Exception as e:
-        print(f"❌ Error loading data for {ticker}: {e}")
+        print(f"❌ โหลดข้อมูลไม่ได้สำหรับ {ticker}: {e}")
         return None
 
     try:
         return {
             'ticker': ticker,
-            'revenue': safe_get_value(fin, 'Total Revenue'),
-            'gross_profit': safe_get_value(fin, 'Gross Profit'),
-            'ebit': safe_get_value(fin, 'EBIT'),
-            'total_assets': safe_get_value(bs, 'Total Assets'),
-            'current_liabilities': safe_get_value(bs, 'Current Liabilities'),
-            'equity': safe_get_value(bs, 'Total Stockholder Equity'),
-            'liabilities': safe_get_value(bs, 'Total Liab'),
-            'operating_cf': safe_get_value(cf, 'Total Cash From Operating Activities'),
-            'capex': safe_get_value(cf, 'Capital Expenditures'),
-            'net_income': safe_get_value(fin, 'Net Income')
+            'revenue': safe_get_value(fin, 'Total Revenue'),                         # รายได้รวม
+            'gross_profit': safe_get_value(fin, 'Gross Profit'),                     # กำไรขั้นต้น
+            'ebit': safe_get_value(fin, 'EBIT'),                                     # กำไรก่อนหักภาษีและดอกเบี้ย
+            'net_income': safe_get_value(fin, 'Net Income'),                         # กำไรสุทธิ
+            'total_assets': safe_get_value(bs, 'Total Assets'),                      # สินทรัพย์รวม
+            'current_liabilities': safe_get_value(bs, 'Current Liabilities'),        # หนี้สินหมุนเวียน
+            'equity': safe_get_value(bs, 'Total Stockholder Equity'),               # ส่วนของผู้ถือหุ้น
+            'liabilities': safe_get_value(bs, 'Total Liab'),                         # หนี้สินรวม
+            'operating_cf': safe_get_value(cf, 'Total Cash From Operating Activities'), # กระแสเงินสดจากการดำเนินงาน
+            'capex': safe_get_value(cf, 'Capital Expenditures')                      # ค่าใช้จ่ายลงทุน
         }
     except Exception as e:
-        print(f"❌ Missing key data for {ticker}: {e}")
+        print(f"❌ ขาดข้อมูลสำคัญของ {ticker}: {e}")
         return None
