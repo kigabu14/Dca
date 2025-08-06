@@ -6,16 +6,16 @@ def analyze_dca(financials: dict) -> dict:
         return None
 
     try:
-        revenue = fin['revenue']
-        gross_profit = fin['gross_profit']
-        ebit = fin['ebit']
-        net_income = fin['net_income']
-        total_assets = fin['total_assets']
-        current_liabilities = fin['current_liabilities']
-        equity = fin['equity']
-        liabilities = fin['liabilities']
-        operating_cf = fin['operating_cf']
-        capex = fin['capex']
+        revenue = financials['revenue']
+        gross_profit = financials['gross_profit']
+        ebit = financials['ebit']
+        net_income = financials['net_income']
+        total_assets = financials['total_assets']
+        current_liabilities = financials['current_liabilities']
+        equity = financials['equity']
+        liabilities = financials['liabilities']
+        operating_cf = financials['operating_cf']
+        capex = financials['capex']
     except:
         return None
 
