@@ -31,11 +31,11 @@ if st.button("🚀 เริ่มวิเคราะห์"):
 
                 with col1:
                     st.subheader(f"📌 {ticker} – สรุปคะแนน DCA")
-                    st.plotly_chart(plot_radar_chart(score_data, title=f"{ticker} - คะแนนรายเกณฑ์"), use_container_width=True)
+                    st.plotly.graph_objects(plot_radar_chart(score_data, title=f"{ticker} - คะแนนรายเกณฑ์"), use_container_width=True)
 
                 with col2:
                     st.subheader(f"📊 {ticker} – สัดส่วนคะแนน")
-                    st.plotly_chart(plot_pie_chart(score_data), use_container_width=True)
+                    st.plotly.graph_objects(plot_pie_chart(score_data), use_container_width=True)
 
                 st.divider()
 
