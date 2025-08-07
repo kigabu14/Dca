@@ -13,7 +13,7 @@ def get_financials(ticker: str):
     stock = yf.Ticker(ticker)
 
     try:
-        fin = stock.financials
+        financials = stock.financials
         bs = stock.balance_sheet
         cf = stock.cashflow
     except Exception as e:
@@ -37,3 +37,4 @@ def get_financials(ticker: str):
     except Exception as e:
         print(f"❌ ขาดข้อมูลสำคัญของ {ticker}: {e}")
         return None
+        
