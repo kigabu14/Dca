@@ -23,10 +23,10 @@ def get_financials(ticker: str):
     try:
         return {
             'ticker': ticker,
-            'revenue': safe_get_value(fin, 'Total Revenue'),                         # รายได้รวม
-            'gross_profit': safe_get_value(fin, 'Gross Profit'),                     # กำไรขั้นต้น
-            'ebit': safe_get_value(fin, 'EBIT'),                                     # กำไรก่อนหักภาษีและดอกเบี้ย
-            'net_income': safe_get_value(fin, 'Net Income'),                         # กำไรสุทธิ
+            'revenue': safe_get_value(financials, 'Total Revenue'),                         # รายได้รวม
+            'gross_profit': safe_get_value(financials, 'Gross Profit'),                     # กำไรขั้นต้น
+            'ebit': safe_get_value(financials, 'EBIT'),                                     # กำไรก่อนหักภาษีและดอกเบี้ย
+            'net_income': safe_get_value(financials, 'Net Income'),                         # กำไรสุทธิ
             'total_assets': safe_get_value(bs, 'Total Assets'),                      # สินทรัพย์รวม
             'current_liabilities': safe_get_value(bs, 'Current Liabilities'),        # หนี้สินหมุนเวียน
             'equity': safe_get_value(bs, 'Total Stockholder Equity'),               # ส่วนของผู้ถือหุ้น
