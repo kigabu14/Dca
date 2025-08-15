@@ -563,23 +563,21 @@ def app_screen():
                     st.error("กรุณาใส่ตัวเลข id ที่ถูกต้อง")
 
     with tab1:
-        st.subheader("🧠 AI สรุปพอร์ต (Gemini)")
-        if st.button("สร้างสรุป"):
-            result = summarize_portfolio_with_gemini(portfolio_df)
-            st.write(result)
-        st.subheader("สรุปพอร์ตของฉัน")
-        pf = portfolio_summary(st.session_state.user_id)
-        st.dataframe(
-            pf.style.format({
-                "units":"{:,.0f}","avg_cost":"{:,.2f}","last":"{:,.2f}",
-                "pnl_%":"{:,.2f}","pnl_value":"{:,.2f}",
-                "ttm_div_ps": "{:,.2f}","yoc_%":"{:,.2f}","ttm_div_total":"{:,.2f}"
-            }),
-            use_container_width=True
-        )
-        if not pf.empty:
-            st.download_button("ดาวน์โหลด CSV", pf.to_csv(index=False).encode("utf-8"), "portfolio.csv", "text/csv")
+    # ⬇️ คำนวณพอร์ตก่อน
+    st.subheader("สรุปพอร์ตของฉัน")
+    pf = portfolio_summary(st.session_state.user_id)
 
+    st.dataframe(
+        pf.style.format({
+            "units":"{:,.0f}","avg_cost":"{:,.2f}","last":"{:,.2f}",
+            "pnl_%":"{:,.2f}","pnl_value":"{:,.2f}",
+            "ttm_div_ps": "{:,.2f}","yoc_%":"{:,.2f}","ttm_div_total":"{:,.2f}"
+        }),
+        use_container_width=True
+    )
+
+    if not pf.empty:
+        st.download_button("ดาวน์โหลด CSV", pf.to_csv(index=False).encode("utf-8"), "portfolio.csv", "text/csv")
         st.divider()
         st.subheader("AI แนะนำ (rule-based + Indicators)")
         sym_up = symbol.strip().upper()
@@ -611,14 +609,12 @@ def app_screen():
             try_notify_buy(st.session_state.user_id, sym_up, market, action, last)
 
         st.divider()
-        st.subheader("🧠 สรุปพอร์ตด้วย LLM (อิงตัวเลขจริงจาก DB)")
-        st.caption("ใส่ OpenAI API Key ใน Sidebar ก่อน จากนั้นกดสร้างสรุป")
-        if st.button("สร้างสรุป AI"):
-            if pf.empty:
-                st.info("ยังไม่มีข้อมูลพอร์ตให้สรุป")
-            else:
-                text, _ = llm_summary_portfolio(pf, st.session_state.username, llm_model, llm_key_input)
-                st.write(text)
+        st.subheader("🧠 AI สรุปพอร์ต (Gemini)")
+        if st.button("สร้างสรุป"):
+            result = summarize_portfolio_with_gemini(pf)  # <-- ใช้ pf
+            st.write(result)
+        
+        
          
     with tab3:
         st.subheader(f"ชาร์ต: {symbol.strip().upper()} ({market}) + EMA/RSI/ATR")
