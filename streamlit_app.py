@@ -10,10 +10,6 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from passlib.hash import bcrypt
 
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 # ---------------- App Config ----------------
 st.set_page_config(page_title="Plug2Plug DCA Pro", page_icon="🧠", layout="wide")
 DB_URL = "sqlite:///portfolio_users.db"
@@ -283,6 +279,18 @@ def portfolio_summary(user_id: int):
 
     return out.sort_values("symbol")
 
+def portfolio_totals(pf: pd.DataFrame):
+    if pf is None or pf.empty:
+        return {"cost":0.0,"value":0.0,"pnl_value":0.0,"pnl_pct":0.0,"div_total":0.0,"combined":0.0}
+    cost = (pf["avg_cost"] * pf["units"]).sum()
+    value = (pf["last"] * pf["units"]).sum()
+    pnl_value = pf["pnl_value"].sum()
+    pnl_pct = ((value - cost) / cost * 100) if cost > 0 else 0.0
+    div_total = pf["ttm_div_total"].sum()
+    combined = pnl_value + div_total
+    return {"cost":float(cost), "value":float(value), "pnl_value":float(pnl_value),
+            "pnl_pct":float(pnl_pct), "div_total":float(div_total), "combined":float(combined)}
+
 # ----------- Notifications -----------
 def get_user_settings(user_id: int):
     with engine.begin() as conn:
@@ -342,10 +350,8 @@ def telegram_notify(bot_token: str, chat_id: str, message: str):
 
 # ----------- Advice & Position Sizing -----------
 def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_month: float, lots: int):
-    notes = []
-    action = "HOLD"
-    buy_qty = 0
-
+    notes = [];
+    action = "HOLD"; buy_qty = 0
     if np.isnan(last) or avg_cost <= 0 or hist is None or hist.empty:
         return action, buy_qty, ["ข้อมูลราคา/ต้นทุน/กราฟ ไม่พร้อม"], {"RSI14": np.nan, "ATR14": np.nan, "SMA20": np.nan, "SMA50": np.nan}
 
@@ -358,36 +364,29 @@ def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_m
     hist["ATR14"] = atr(hist, 14)
 
     c = hist["Close"].iloc[-1]
-    s20 = hist["SMA20"].iloc[-1]
-    s50 = hist["SMA50"].iloc[-1]
-    e20 = hist["EMA20"].iloc[-1]
-    e50 = hist["EMA50"].iloc[-1]
-    r14 = hist["RSI14"].iloc[-1]
-    a14 = hist["ATR14"].iloc[-1]
+    s20 = hist["SMA20"].iloc[-1]; s50 = hist["SMA50"].iloc[-1]
+    e20 = hist["EMA20"].iloc[-1]; e50 = hist["EMA50"].iloc[-1]
+    r14 = hist["RSI14"].iloc[-1]; a14 = hist["ATR14"].iloc[-1]
 
     gap = (avg_cost - last) / max(avg_cost, 1e-9) * 100
     up_trend = (c > s20) and (s20 > s50) and (e20 > e50)
 
     if gap >= 5:
-        action = "BUY (DCA)"
-        notes.append(f"ราคาต่ำกว่าทุนเฉลี่ย ~{gap:.1f}%")
+        action = "BUY (DCA)"; notes.append(f"ราคาต่ำกว่าทุนเฉลี่ย ~{gap:.1f}%")
     elif up_trend and 40 <= r14 <= 70:
-        action = "BUY SMALL"
-        notes.append("แนวโน้มขาขึ้น (Close>SMA20>SMA50 & EMA20>EMA50) และ RSI กลางๆ")
+        action = "BUY SMALL"; notes.append("แนวโน้มขาขึ้น (Close>SMA20>SMA50 & EMA20>EMA50) และ RSI กลางๆ")
     elif r14 < 30:
-        action = "WATCHLIST"
-        notes.append("RSI Oversold — รอสัญญาณเด้งยืนยันก่อน")
+        action = "WATCHLIST"; notes.append("RSI Oversold — รอสัญญาณเด้งยืนยันก่อน")
     else:
-        action = "HOLD"
-        notes.append("ยังไม่ชัด รอย่อหรือรอเบรกไฮ")
+        action = "HOLD"; notes.append("ยังไม่ชัด รอย่อหรือรอเบรกไฮ")
 
     per_lot_budget = max(budget_month / max(lots,1), 0)
     if action.startswith("BUY") and per_lot_budget > 0 and (not np.isnan(a14)) and a14 > 0:
-        risk_per_share = a14 * 2  # 2*ATR เป็น stop เบื้องต้น
+        risk_per_share = a14 * 2
         est_shares = int(per_lot_budget // max(risk_per_share, 1e-9))
-        if est_shares <= 0 and last > 0:
-            est_shares = int(per_lot_budget // last)
-            if est_shares == 0 and per_lot_budget >= last*0.6:
+        if est_shares <= 0 and c > 0:
+            est_shares = int(per_lot_budget // c)
+            if est_shares == 0 and per_lot_budget >= c*0.6:
                 est_shares = 1
         buy_qty = est_shares
         notes.append(f"ATR14≈{a14:.2f} → ความเสี่ยง/หุ้น≈{risk_per_share:.2f} | งบ/ไม้≈{per_lot_budget:,.0f} → แนะนำซื้อ {buy_qty} หุ้น")
@@ -397,15 +396,11 @@ def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_m
 
 def try_notify_buy(user_id: int, symbol: str, market: str, action: str, price: float):
     settings = get_user_settings(user_id)
-    if not settings or not settings.get("notify_on_buy", 0):
-        return
-    if not action.startswith("BUY"):
-        return
-    if already_alerted_recently(user_id, symbol, action, hours=12):
-        return
+    if not settings or not settings.get("notify_on_buy", 0): return
+    if not action.startswith("BUY"): return
+    if already_alerted_recently(user_id, symbol, action, hours=12): return
     msg = f"[Plug2Plug DCA] {symbol} ({market}) สัญญาณ {action} @ ~{price:.2f}"
-    if settings.get("line_token"):
-        line_notify(settings.get("line_token"), msg)
+    if settings.get("line_token"): line_notify(settings.get("line_token"), msg)
     if settings.get("telegram_token") and settings.get("telegram_chat_id"):
         telegram_notify(settings.get("telegram_token"), settings.get("telegram_chat_id"), msg)
     record_alert(user_id, symbol, action)
@@ -416,37 +411,57 @@ def summarize_portfolio_with_gemini(portfolio_df: pd.DataFrame, model_name="gemi
         return "⚠️ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน st.secrets หรือ ENV"
     try:
         data = portfolio_df.to_dict(orient="records")
-        prompt = ("
-        คุณคือผู้ช่วยนักวิเคราะห์การลงทุนแนว DCA ที่ทำงานตามข้อมูลจริง ไม่มโน ไม่เดา
-        ให้คำแนะนำที่สอดคล้องกับวินัยการลงทุนและความเสี่ยง โดยใช้เฉพาะข้อมูลที่ให้เท่านั้น
+        prompt = (
+            "คุณคือผู้ช่วยการลงทุนแนว DCA ช่วยสรุปพอร์ตเป็นภาษาไทยแบบกระชับเป็นข้อ ๆ "
+            "อธิบาย PnL, Yield-on-Cost, กระแสเงินปันผล (TTM) และชี้เงื่อนไขซื้อ/ถัวแบบมีวินัย "
+            "ใช้เฉพาะตัวเลขจาก JSON ด้านล่าง ห้ามเดาข้อมูลใหม่ และเตือนความเสี่ยงอย่างย่อ\n\n"
+            f"JSON พอร์ต:\n{data}"
+        )
+        model = genai.GenerativeModel(model_name)
+        res = model.generate_content(prompt)
+        return res.text
+    except Exception as e:
+        return f"LLM Error: {e}"
 
-        [สถานะพอร์ตของผู้ใช้]:
-        {pf_json}
+# ---------- Gemini Prompt (เวอร์ชันไม่มี News API: ผู้ใช้พิมพ์ข่าวเอง) ----------
+PROMPT_DCA_NEWS = """
+คุณคือผู้ช่วยนักวิเคราะห์การลงทุน ทำหน้าที่วิเคราะห์พอร์ตหุ้นของผู้ใช้ 
+โดยใช้ข้อมูลข่าวสารจากสื่อสังคมออนไลน์ (social media), ข่าวเศรษฐกิจ, ข่าวธุรกิจ, และข้อมูลพื้นฐาน/เทคนิคของหุ้นจริง
+เป้าหมายคือให้คำแนะนำที่แม่นยำตามสถานการณ์ปัจจุบัน ไม่มโน ไม่เดา
 
-        [ตัวเลขเทคนิค (ล่าสุด)]:
-        {tech_json}
+[ข้อมูลพอร์ตปัจจุบัน]
+{portfolio_data}   # ตารางหุ้น, ราคาเฉลี่ย, ราคาปัจจุบัน, กำไร/ขาดทุน %, Dividend Yield
 
-        [ข่าว/โซเชียลล่าสุด] (ทั้งภาษาไทยและอังกฤษ):
-        {news_bullets}
+[ข่าวและข้อมูลล่าสุด]
+{news_data}        # สรุปข่าว/โพสต์ที่ผู้ใช้พิมพ์มาเอง หรือค่าที่ส่งเข้ามา (เช่น EMA, RSI, ATR แบบย่อ)
 
-        [บันทึกเพิ่มเติมจากผู้ใช้]:
-        {user_notes}
+**สิ่งที่ต้องวิเคราะห์และให้คำตอบ**
+1. หุ้นตัวไหนควรถัวเพิ่ม ตามกลยุทธ์ DCA พร้อมเหตุผล (เช่น ราคาอยู่ในโซนสะสม, ปัจจัยพื้นฐานยังดี, ข่าวหนุน)
+2. หุ้นตัวไหนควรถือ รอดูต่อ เพราะยังไม่มีสัญญาณชัดเจน
+3. หุ้นตัวไหนควรขายเพื่อตัดขาดทุน พร้อมเหตุผล (เช่น แนวโน้มธุรกิจถดถอย, ข่าวลบ, แนวรับสำคัญหลุด)
+4. เสนอหุ้นตัวใหม่ที่มีแนวโน้มธุรกิจเติบโตและราคาน่าสนใจ เพื่อเป็นตัวเลือกลงทุน
+5. ให้เหตุผลทั้งหมดอย่างกระชับ ชัดเจน อ้างอิงจากข้อมูลจริง ไม่เดา ไม่สร้างข้อมูลเท็จ
 
-        กรุณาวิเคราะห์และสรุปเป็นหมวดหมู่:
-        1) 📈 ควรถัวเพิ่ม: หุ้นใด และเพราะอะไร 
-        - ให้เหตุผล เช่น ราคาอยู่ในโซนสะสม, เทรนด์ดี, ข่าวบวก, พื้นฐานแข็งแรง
-        2) ✋ ถือรอดู: หุ้นใด และเพราะอะไร 
-        เช่น ข่าวไม่ชัดเจน, รอดูสัญญาณเทคนิค, รอดูผลประกอบการ
-        3) 📉 ควรขายตัดขาดทุน: หุ้นใด และเพราะอะไร 
-        เช่น แนวโน้มธุรกิจถดถอย, ข่าวลบ, หลุดแนวรับสำคัญ
-        4) 🌱 ตัวเลือกเติบโตใหม่ (ถ้ามีจากข่าว):
-        ชื่อหุ้น + เหตุผลแบบสั้นว่าทำไมถึงน่าสนใจ
-    
-        ข้อกำหนด:
-        - ถ้าข้อมูลไม่เพียงพอให้ระบุว่า 'ไม่มีข้อมูลเพียงพอ'
-        - ห้ามรับรองผลตอบแทน
-        - ให้ bullet กระชับ ชัดเจน เป็นภาษาไทย
-        ")
+รูปแบบการตอบ:
+- 📈 **ควรถัวเพิ่ม:** [ชื่อหุ้น] - [เหตุผล]
+- ✋ **ถือรอดู:** [ชื่อหุ้น] - [เหตุผล]
+- 📉 **ควรขาย:** [ชื่อหุ้น] - [เหตุผล]
+- 🌱 **ตัวเลือกเติบโตใหม่:** [ชื่อหุ้น] - [เหตุผล]
+
+ข้อสำคัญ:
+- ถ้าไม่มีข้อมูลเพียงพอ ให้บอก "ไม่มีข้อมูลเพียงพอ" แทนการเดา
+- ใช้ข้อมูลจาก {news_data} และ {portfolio_data} เป็นหลัก
+"""
+
+def analyze_portfolio_news_with_gemini(portfolio_df: pd.DataFrame, user_news_text: str, model_name="gemini-1.5-flash"):
+    if not GEMINI_API_KEY:
+        return "⚠️ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน st.secrets หรือ ENV"
+    try:
+        portfolio_str = portfolio_df.to_string(index=False)
+        prompt = PROMPT_DCA_NEWS.format(
+            portfolio_data = portfolio_str,
+            news_data = user_news_text.strip() if user_news_text.strip() else "- (ยังไม่มีข่าว/โน้ตจากผู้ใช้)"
+        )
         model = genai.GenerativeModel(model_name)
         res = model.generate_content(prompt)
         return res.text
@@ -540,20 +555,33 @@ def app_screen():
     st.title("📈 Plug2Plug DCA Pro — Per-User Portfolio + Dividends + Alerts + LLM")
     st.caption("ถัวอย่างมีวินัย • ปันผล • สัญญาณแจ้งเตือน • สรุปด้วย Gemini")
 
-    # Sidebar settings
+    # ---------- TOP SELECTOR (เห็นทุกแท็บ) ----------
+    st.markdown("### 🔎 เลือกหุ้นที่กำลังดู")
+    c_mkt, c_symbol, c_custom = st.columns([1,2,2])
+
+    mkt_default = st.session_state.get("market_sel", "TH")
+    mkt = c_mkt.selectbox("ตลาด", ["TH","US"], index=0 if mkt_default=="TH" else 1, key="market_sel")
+
+    opts = tickers_th if mkt == "TH" else tickers_us
+    sym_default = st.session_state.get("symbol_sel", (opts[0] if opts else ("KTB" if mkt=="TH" else "AAPL")))
+    sym_list = opts if opts else [sym_default]
+    idx_default = sym_list.index(sym_default) if sym_default in sym_list else 0
+    sym_pick = c_symbol.selectbox("สัญลักษณ์ (ค้นหาได้)", sym_list, index=idx_default)
+
+    sym_custom = c_custom.text_input("หรือพิมพ์เอง (Custom)", value=st.session_state.get("symbol_custom","")).strip().upper()
+    sym = sym_custom if sym_custom else sym_pick
+
+    # เก็บไว้ใช้ทุกแท็บ
+    st.session_state["symbol_sel"] = sym
+    st.session_state["symbol_custom"] = sym_custom
+    st.session_state["market_sel"] = mkt
+
+    st.caption(f"กำลังดู: **{sym} ({mkt})**")
+    st.divider()
+    # ---------------------------------------------------
+
+    # Sidebar settings (งบ/ไม้ และการแจ้งเตือน/Gemini)
     st.sidebar.header("📊 DCA Settings")
-    market = st.sidebar.selectbox("ตลาด", ["TH","US"], key="market")
-    options = tickers_th if market == "TH" else tickers_us
-    options_with_custom = ["-- เลือกจากลิสต์ --"] + options + ["(Custom)"]
-    choice = st.sidebar.selectbox("เลือกหุ้น", options_with_custom, index=0, key="symbol_choice")
-
-    if choice == "(Custom)":
-        symbol = st.sidebar.text_input("พิมพ์สัญลักษณ์เอง", value=("KTB" if market=="TH" else "AAPL"), key="symbol_custom").upper()
-    elif choice == "-- เลือกจากลิสต์ --":
-        symbol = (options[0] if options else ("KTB" if market=="TH" else "AAPL"))
-    else:
-        symbol = choice
-
     budget = st.sidebar.number_input("งบ DCA ต่อเดือน", min_value=0.0, value=10000.0, step=1000.0, key="budget")
     lots = st.sidebar.number_input("จำนวนไม้/เดือน", min_value=1, value=4, step=1, key="lots")
 
@@ -580,17 +608,17 @@ def app_screen():
         st.subheader("บันทึกการซื้อ (DCA)")
         c1, c2, c3 = st.columns(3)
         qty = c1.number_input("จำนวนหุ้น", min_value=0.0, value=100.0, step=10.0, key="qty")
-        price = c2.number_input("ราคาต่อหุ้น", min_value=0.0, value=24.00 if market=="TH" else 100.0, step=0.01, key="price")
+        price = c2.number_input("ราคาต่อหุ้น", min_value=0.0, value=24.00 if mkt=="TH" else 100.0, step=0.01, key="price")
         tdate = c3.date_input("วันที่ซื้อ", value=date.today(), key="tdate")
         if st.button("เพิ่มดีล"):
-            if symbol.strip():
-                add_trade(st.session_state.user_id, symbol.strip().upper(), market, qty, price, tdate.isoformat())
+            if sym.strip():
+                add_trade(st.session_state.user_id, sym.strip().upper(), mkt, qty, price, tdate.isoformat())
                 st.success("บันทึกแล้ว ✅")
                 st.cache_data.clear()
             else:
                 st.error("กรุณาใส่สัญลักษณ์หุ้น")
 
-        my_trades = load_trades(st.session_state.user_id, symbol.strip().upper())
+        my_trades = load_trades(st.session_state.user_id, sym.strip().upper())
         if not my_trades.empty:
             st.write("ประวัติการซื้อขาย (สัญลักษณ์นี้)")
             st.dataframe(my_trades, use_container_width=True, hide_index=True)
@@ -610,9 +638,16 @@ def app_screen():
         try:
             pf = portfolio_summary(st.session_state.user_id)
         except Exception as e:
-            st.error("เกิดข้อผิดพลาดตอนสร้างสรุปพอร์ต")
-            st.exception(e)
-            st.stop()
+            st.error("เกิดข้อผิดพลาดตอนสร้างสรุปพอร์ต"); st.exception(e); st.stop()
+
+        # ---- Total Summary (รวมทั้งพอร์ต)
+        tot = portfolio_totals(pf)
+        mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+        mc1.metric("มูลค่าพอร์ต", f"{tot['value']:,.2f}")
+        mc2.metric("ต้นทุนรวม", f"{tot['cost']:,.2f}")
+        mc3.metric("กำไร/ขาดทุนรวม", f"{tot['pnl_value']:,.2f}", f"{tot['pnl_pct']:,.2f}%")
+        mc4.metric("ปันผลรวม (TTM)", f"{tot['div_total']:,.2f}")
+        mc5.metric("กำไรสุทธิ + ปันผล", f"{tot['combined']:,.2f}")
 
         st.dataframe(
             pf.style.format({
@@ -626,16 +661,15 @@ def app_screen():
             st.download_button("ดาวน์โหลด CSV", pf.to_csv(index=False).encode("utf-8"), "portfolio.csv", "text/csv")
 
         st.divider()
-        st.subheader("AI แนะนำ (rule-based + Indicators)")
-        sym_up = symbol.strip().upper()
-        user_trades = load_trades(st.session_state.user_id, sym_up)
+        st.subheader("AI แนะนำ (rule-based + Indicators) — กำลังดู: " + f"{sym} ({mkt})")
+        user_trades = load_trades(st.session_state.user_id, sym.strip().upper())
         if user_trades.empty:
             st.info("ยังไม่มีดีลของสัญลักษณ์นี้")
         else:
             units = float(user_trades["qty"].sum())
             avg_cost = float((user_trades["qty"]*user_trades["price"]).sum() / max(units,1))
-            hist = get_hist(sym_up, market, period="6mo", with_hlc=True)
-            last = float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty else get_price(sym_up, market)
+            hist = get_hist(sym.strip().upper(), mkt, period="6mo", with_hlc=True)
+            last = float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty else get_price(sym.strip().upper(), mkt)
             action, buy_qty, notes, ind = rule_based_advice(avg_cost, last, hist, budget, lots)
 
             c1,c2,c3,c4 = st.columns(4)
@@ -653,7 +687,7 @@ def app_screen():
             for n in notes:
                 st.write("• " + n)
 
-            try_notify_buy(st.session_state.user_id, sym_up, market, action, last)
+            try_notify_buy(st.session_state.user_id, sym.strip().upper(), mkt, action, last)
 
         st.divider()
         st.subheader("🧠 AI สรุปพอร์ต (Gemini)")
@@ -661,10 +695,20 @@ def app_screen():
             result = summarize_portfolio_with_gemini(pf, model_name=gemini_model)
             st.write(result)
 
+        st.divider()
+        st.subheader("📰 ข่าว + 🤖 AI วิเคราะห์ DCA (พิมพ์ข่าวเองได้)")
+        user_news_text = st.text_area("สรุปข่าว/โพสต์/ตัวเลขเทคนิค (พิมพ์เองได้ เช่น 'KTB: กำไร Q2 โต 12% | RSI ~45 | EMA20 > EMA50')", height=140)
+        if st.button("วิเคราะห์ตามข่าวด้วย Gemini"):
+            if pf.empty:
+                st.warning("ยังไม่มีข้อมูลพอร์ต")
+            else:
+                ai_out = analyze_portfolio_news_with_gemini(pf, user_news_text, model_name=gemini_model)
+                st.write(ai_out)
+
     # -------- Tab 3: ชาร์ตราคา --------
     with tab3:
-        st.subheader(f"ชาร์ต: {symbol.strip().upper()} ({market}) + EMA/RSI/ATR")
-        hist = get_hist(symbol.strip().upper(), market, period="1y", with_hlc=True)
+        st.subheader(f"ชาร์ต: {sym.strip().upper()} ({mkt}) + EMA/RSI/ATR")
+        hist = get_hist(sym.strip().upper(), mkt, period="1y", with_hlc=True)
         if hist is None or hist.empty:
             st.info("ยังไม่มีข้อมูลกราฟ")
         else:
@@ -681,10 +725,10 @@ def app_screen():
 
     # -------- Tab 4: ปันผล --------
     with tab4:
-        st.subheader("ปันผล / Dividends")
+        st.subheader("ปันผล / Dividends — กำลังดู: " + f"{sym} ({mkt})")
         c1, c2 = st.columns(2)
         if c1.button("ดึงและบันทึกปันผล (ตัวที่เลือก) 5 ปีล่าสุด"):
-            n = fetch_and_store_dividends(st.session_state.user_id, symbol.strip().upper(), market, years=5)
+            n = fetch_and_store_dividends(st.session_state.user_id, sym.strip().upper(), mkt, years=5)
             st.success(f"ซิงก์แล้ว (แถวใหม่/ซ้ำจะไม่เพิ่ม): {n} รายการ")
         if c2.button("ดึงและบันทึกปันผล **ทุกตัวในพอร์ต** 5 ปีล่าสุด"):
             syms = portfolio_symbols(st.session_state.user_id)
@@ -693,7 +737,7 @@ def app_screen():
                 total += fetch_and_store_dividends(st.session_state.user_id, s['symbol'], s['market'], years=5)
             st.success(f"ซิงก์ทั้งหมดแล้ว: +{total} รายการ")
 
-        dv = load_dividends(st.session_state.user_id, symbol.strip().upper())
+        dv = load_dividends(st.session_state.user_id, sym.strip().upper())
         st.markdown("**รายการปันผลที่บันทึกไว้ (ล่าสุดก่อน):**")
         if dv.empty:
             st.info("ยังไม่มีข้อมูลปันผลของสัญลักษณ์นี้ — กดปุ่มซิงก์ด้านบน")
@@ -705,7 +749,6 @@ def app_screen():
         if not dv.empty:
             dv = dv.copy()
             dv["ex_date"] = pd.to_datetime(dv["ex_date"])
-            # ทำให้ tz-naive เพื่อความเสถียร
             try:
                 dv["ex_date"] = dv["ex_date"].dt.tz_convert(None)
             except Exception:
