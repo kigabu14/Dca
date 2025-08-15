@@ -5,7 +5,7 @@ pandas
 numpy
 SQLAlchemy==2.0.30
 passlib[bcrypt]
-
+python-dotenv
 tk==0.1.0
 matplotlib==3.7.2
 
