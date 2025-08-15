@@ -15,7 +15,6 @@ st.set_page_config(page_title="Plug2Plug DCA Pro", page_icon="🧠", layout="wid
 DB_URL = "sqlite:///portfolio_users.db"
 
 # ---------------- Secrets / API Keys ----------------
-# อ่านจาก st.secrets ก่อน แล้ว fallback ไป ENV เพื่อกันคีย์หาย
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -63,7 +62,7 @@ def init_db():
             line_token TEXT,
             telegram_token TEXT,
             telegram_chat_id TEXT,
-            notify_on_buy INTEGER DEFAULT 0   -- 0/1
+            notify_on_buy INTEGER DEFAULT 0
         );
         """))
         conn.execute(text("""
@@ -75,7 +74,6 @@ def init_db():
             sent_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """))
-
 init_db()
 
 # ---------------- Helpers ----------------
@@ -113,11 +111,8 @@ def get_hist(symbol: str, market: str, period="6mo", with_hlc=True):
         df["Close"] = np.nan
     return df
 
-def sma(series, window):
-    return series.rolling(window).mean()
-
-def ema(series, span):
-    return series.ewm(span=span, adjust=False).mean()
+def sma(series, window): return series.rolling(window).mean()
+def ema(series, span): return series.ewm(span=span, adjust=False).mean()
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -173,13 +168,11 @@ def portfolio_symbols(user_id: int):
 def fetch_and_store_dividends(user_id: int, symbol: str, market: str, years=5):
     t = yf.Ticker(yf_symbol(symbol, market))
     try:
-        div = t.dividends  # Series index = ex-date (อาจมี tz)
+        div = t.dividends
     except Exception:
         div = None
     if div is None or len(div) == 0:
         return 0
-
-    # ทำ index เป็น tz-naive ก่อน filter
     idx = pd.to_datetime(div.index)
     try:
         idx = idx.tz_convert(None)
@@ -189,7 +182,6 @@ def fetch_and_store_dividends(user_id: int, symbol: str, market: str, years=5):
         except Exception:
             pass
     div.index = idx
-
     cutoff = pd.Timestamp.today().tz_localize(None) - pd.DateOffset(years=years)
     div = div[div.index >= cutoff]
 
@@ -219,7 +211,6 @@ def load_dividends(user_id: int, symbol: str = None):
     return df
 
 def ttm_dividend_per_share(user_id: int, symbol: str):
-    # รวมปันผล 12 เดือนล่าสุด (TTM)
     one_year_ago = (datetime.utcnow() - timedelta(days=365)).date().isoformat()
     with engine.begin() as conn:
         rows = conn.execute(text("""
@@ -231,25 +222,21 @@ def ttm_dividend_per_share(user_id: int, symbol: str):
     return float(np.sum([r[0] for r in rows]))
 
 def portfolio_summary(user_id: int):
-    # ดึงข้อมูลดิบ
     with engine.begin() as conn:
         raw = pd.read_sql(
             text("SELECT symbol, market, qty, price FROM trades WHERE user_id=:uid"),
             conn, params={"uid": user_id}
         )
 
-    # ถ้าไม่มีดีลก็คืน DataFrame โครงสร้างพร้อมแสดง
     if raw.empty:
         return pd.DataFrame(columns=[
             "symbol","market","units","avg_cost","last","pnl_%","pnl_value",
             "ttm_div_ps","yoc_%","ttm_div_total"
         ])
 
-    # ทำความสะอาด dtype
     for c in ["qty","price"]:
         raw[c] = pd.to_numeric(raw[c], errors="coerce").fillna(0.0)
 
-    # คำนวณ units / avg_cost แบบ aggregate (เลี่ยง FutureWarning)
     raw["cost"] = raw["qty"] * raw["price"]
     grouped = (raw.groupby(["symbol","market"], as_index=False)
                   .agg(units=("qty","sum"), total_cost=("cost","sum")))
@@ -258,7 +245,6 @@ def portfolio_summary(user_id: int):
                                    0.0)
     out = grouped.drop(columns=["total_cost"])
 
-    # ราคาล่าสุด + ปันผล TTM
     prices, ttm_ps = [], []
     for _, row in out.iterrows():
         last = get_price(row["symbol"], row["market"])
@@ -350,8 +336,10 @@ def telegram_notify(bot_token: str, chat_id: str, message: str):
 
 # ----------- Advice & Position Sizing -----------
 def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_month: float, lots: int):
-    notes = [];
-    action = "HOLD"; buy_qty = 0
+    notes = []
+    action = "HOLD"
+    buy_qty = 0
+
     if np.isnan(last) or avg_cost <= 0 or hist is None or hist.empty:
         return action, buy_qty, ["ข้อมูลราคา/ต้นทุน/กราฟ ไม่พร้อม"], {"RSI14": np.nan, "ATR14": np.nan, "SMA20": np.nan, "SMA50": np.nan}
 
@@ -364,25 +352,32 @@ def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_m
     hist["ATR14"] = atr(hist, 14)
 
     c = hist["Close"].iloc[-1]
-    s20 = hist["SMA20"].iloc[-1]; s50 = hist["SMA50"].iloc[-1]
-    e20 = hist["EMA20"].iloc[-1]; e50 = hist["EMA50"].iloc[-1]
-    r14 = hist["RSI14"].iloc[-1]; a14 = hist["ATR14"].iloc[-1]
+    s20 = hist["SMA20"].iloc[-1]
+    s50 = hist["SMA50"].iloc[-1]
+    e20 = hist["EMA20"].iloc[-1]
+    e50 = hist["EMA50"].iloc[-1]
+    r14 = hist["RSI14"].iloc[-1]
+    a14 = hist["ATR14"].iloc[-1]
 
     gap = (avg_cost - last) / max(avg_cost, 1e-9) * 100
     up_trend = (c > s20) and (s20 > s50) and (e20 > e50)
 
     if gap >= 5:
-        action = "BUY (DCA)"; notes.append(f"ราคาต่ำกว่าทุนเฉลี่ย ~{gap:.1f}%")
+        action = "BUY (DCA)"
+        notes.append(f"ราคาต่ำกว่าทุนเฉลี่ย ~{gap:.1f}%")
     elif up_trend and 40 <= r14 <= 70:
-        action = "BUY SMALL"; notes.append("แนวโน้มขาขึ้น (Close>SMA20>SMA50 & EMA20>EMA50) และ RSI กลางๆ")
+        action = "BUY SMALL"
+        notes.append("แนวโน้มขาขึ้น (Close>SMA20>SMA50 & EMA20>EMA50) และ RSI กลางๆ")
     elif r14 < 30:
-        action = "WATCHLIST"; notes.append("RSI Oversold — รอสัญญาณเด้งยืนยันก่อน")
+        action = "WATCHLIST"
+        notes.append("RSI Oversold — รอสัญญาณเด้งยืนยันก่อน")
     else:
-        action = "HOLD"; notes.append("ยังไม่ชัด รอย่อหรือรอเบรกไฮ")
+        action = "HOLD"
+        notes.append("ยังไม่ชัด รอย่อหรือรอเบรกไฮ")
 
     per_lot_budget = max(budget_month / max(lots,1), 0)
     if action.startswith("BUY") and per_lot_budget > 0 and (not np.isnan(a14)) and a14 > 0:
-        risk_per_share = a14 * 2
+        risk_per_share = a14 * 2  # 2*ATR stop เบื้องต้น
         est_shares = int(per_lot_budget // max(risk_per_share, 1e-9))
         if est_shares <= 0 and c > 0:
             est_shares = int(per_lot_budget // c)
@@ -571,16 +566,16 @@ def app_screen():
     sym_custom = c_custom.text_input("หรือพิมพ์เอง (Custom)", value=st.session_state.get("symbol_custom","")).strip().upper()
     sym = sym_custom if sym_custom else sym_pick
 
-    # เก็บไว้ใช้ทุกแท็บ
+    # เก็บค่า (อย่าเขียนทับ key widget)
     st.session_state["symbol_sel"] = sym
     st.session_state["symbol_custom"] = sym_custom
-    # ห้ามเขียนทับ key widget ให้เก็บเป็น key ใหม่แทน
-    st.session_state["market_current"] = mkt
+    st.session_state["market_current"] = mkt  # เก็บสำเนา ไม่ชน widget key
+
     st.caption(f"กำลังดู: **{sym} ({mkt})**")
     st.divider()
     # ---------------------------------------------------
 
-    # Sidebar settings (งบ/ไม้ และการแจ้งเตือน/Gemini)
+    # Sidebar settings
     st.sidebar.header("📊 DCA Settings")
     budget = st.sidebar.number_input("งบ DCA ต่อเดือน", min_value=0.0, value=10000.0, step=1000.0, key="budget")
     lots = st.sidebar.number_input("จำนวนไม้/เดือน", min_value=1, value=4, step=1, key="lots")
@@ -603,14 +598,17 @@ def app_screen():
     # Tabs
     tab1, tab2, tab3, tab4 = st.tabs(["พอร์ต","บันทึกซื้อถัว","ชาร์ตราคา","ปันผล/Dividends"])
 
-    # -------- Tab 2: บันทึกซื้อถัว --------
+    # -------- Tab 2: บันทึกซื้อถัว (เพิ่ม/ลบหลายรายการ) --------
     with tab2:
-        st.subheader("บันทึกการซื้อ (DCA)")
+        st.subheader("บันทึกการซื้อ (DCA) — กำลังดู: " + f"{sym} ({mkt})")
+
         c1, c2, c3 = st.columns(3)
         qty = c1.number_input("จำนวนหุ้น", min_value=0.0, value=100.0, step=10.0, key="qty")
         price = c2.number_input("ราคาต่อหุ้น", min_value=0.0, value=24.00 if mkt=="TH" else 100.0, step=0.01, key="price")
         tdate = c3.date_input("วันที่ซื้อ", value=date.today(), key="tdate")
-        if st.button("เพิ่มดีล"):
+
+        colA, colB = st.columns([1,1])
+        if colA.button("เพิ่มดีล (ตัวเดียว)"):
             if sym.strip():
                 add_trade(st.session_state.user_id, sym.strip().upper(), mkt, qty, price, tdate.isoformat())
                 st.success("บันทึกแล้ว ✅")
@@ -618,19 +616,43 @@ def app_screen():
             else:
                 st.error("กรุณาใส่สัญลักษณ์หุ้น")
 
-        my_trades = load_trades(st.session_state.user_id, sym.strip().upper())
-        if not my_trades.empty:
-            st.write("ประวัติการซื้อขาย (สัญลักษณ์นี้)")
-            st.dataframe(my_trades, use_container_width=True, hide_index=True)
-            del_id = st.text_input("ลบดีล (ใส่ id)", value="", key="del_id")
-            if st.button("ลบรายการตาม id"):
+        st.markdown("### ➕ เพิ่มดีลเป็นชุด (หลายตัวพร้อมกัน)")
+        st.caption("รูปแบบต่อบรรทัด: SYMBOL,MARKET, QTY, PRICE, DATE  เช่น  `KTB,TH, 200, 23.50, 2025-08-10`")
+        bulk_text = st.text_area("วางหลายบรรทัด", height=140, placeholder="KTB,TH, 200, 23.50, 2025-08-10\nAAPL,US, 5, 190.00, 2025-08-11")
+        if st.button("เพิ่มดีล (เป็นชุด)"):
+            ok = 0; bad = []
+            for ln in bulk_text.splitlines():
+                if not ln.strip(): continue
                 try:
-                    tid = int(del_id)
-                    delete_trade(st.session_state.user_id, tid)
-                    st.success(f"ลบดีล id={tid} แล้ว")
-                    st.cache_data.clear()
-                except:
-                    st.error("กรุณาใส่ตัวเลข id ที่ถูกต้อง")
+                    parts = [p.strip() for p in ln.split(",")]
+                    symbol_i, market_i = parts[0].upper(), parts[1].upper()
+                    qty_i = float(parts[2]); price_i = float(parts[3]); date_i = parts[4]
+                    datetime.fromisoformat(date_i)
+                    add_trade(st.session_state.user_id, symbol_i, market_i, qty_i, price_i, date_i)
+                    ok += 1
+                except Exception as e:
+                    bad.append(f"- `{ln}` → {e}")
+            st.cache_data.clear()
+            if ok: st.success(f"บันทึกสำเร็จ {ok} รายการ")
+            if bad: st.error("บางบรรทัดผิดพลาด:\n" + "\n".join(bad))
+
+        st.markdown("### 🧾 ประวัติการซื้อขาย")
+        my_trades = load_trades(st.session_state.user_id, sym.strip().upper())
+        if my_trades.empty:
+            st.info("ยังไม่มีดีลของสัญลักษณ์นี้")
+        else:
+            st.dataframe(my_trades, use_container_width=True, hide_index=True)
+            sel_ids = st.multiselect("เลือก id เพื่อ 'ลบหลายรายการ'", options=my_trades["id"].astype(int).tolist())
+            if st.button("ลบรายการที่เลือก"):
+                deleted = 0
+                for tid in sel_ids:
+                    try:
+                        delete_trade(st.session_state.user_id, int(tid))
+                        deleted += 1
+                    except:
+                        pass
+                st.cache_data.clear()
+                st.success(f"ลบแล้ว {deleted} รายการ")
 
     # -------- Tab 1: พอร์ต + AI --------
     with tab1:
@@ -662,14 +684,15 @@ def app_screen():
 
         st.divider()
         st.subheader("AI แนะนำ (rule-based + Indicators) — กำลังดู: " + f"{sym} ({mkt})")
-        user_trades = load_trades(st.session_state.user_id, sym.strip().upper())
+        sym_up = sym.strip().upper()
+        user_trades = load_trades(st.session_state.user_id, sym_up)
         if user_trades.empty:
             st.info("ยังไม่มีดีลของสัญลักษณ์นี้")
         else:
             units = float(user_trades["qty"].sum())
             avg_cost = float((user_trades["qty"]*user_trades["price"]).sum() / max(units,1))
-            hist = get_hist(sym.strip().upper(), mkt, period="6mo", with_hlc=True)
-            last = float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty else get_price(sym.strip().upper(), mkt)
+            hist = get_hist(sym_up, mkt, period="6mo", with_hlc=True)
+            last = float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty else get_price(sym_up, mkt)
             action, buy_qty, notes, ind = rule_based_advice(avg_cost, last, hist, budget, lots)
 
             c1,c2,c3,c4 = st.columns(4)
@@ -687,14 +710,45 @@ def app_screen():
             for n in notes:
                 st.write("• " + n)
 
-            try_notify_buy(st.session_state.user_id, sym.strip().upper(), mkt, action, last)
+            try_notify_buy(st.session_state.user_id, sym_up, mkt, action, last)
 
+        # --- AI โปรแกรมล้วน (สรุปทั้งพอร์ต ไม่ใช้ LLM) ---
+        st.divider()
+        st.subheader("🤖 AI โปรแกรมล้วน — สรุปทุกตัวในพอร์ต (ไม่ใช้ LLM)")
+        if st.button("รันสรุปเชิงโปรแกรม (ทั้งพอร์ต)"):
+            rec = analyze_portfolio_programmatic(st.session_state.user_id)
+            if rec.empty:
+                st.info("ยังไม่มีดีลในพอร์ต")
+            else:
+                st.dataframe(
+                    rec.style.format({
+                        "units":"{:,.0f}", "avg_cost":"{:,.2f}", "last":"{:,.2f}",
+                        "RSI14":"{:,.1f}", "ATR14":"{:,.2f}", "stop_loss":"{:,.2f}"
+                    }),
+                    use_container_width=True, hide_index=True
+                )
+                st.markdown("**สรุปข้อเสนอแนะ:**")
+                for _, row in rec.iterrows():
+                    bullet = f"- **{row['symbol']} ({row['market']})** → `{row['action']}`"
+                    detail = []
+                    if row.get("entry_note") and row["entry_note"] != "-":
+                        detail.append(row["entry_note"])
+                    if pd.notna(row.get("stop_loss")) and row["stop_loss"]>0:
+                        detail.append(f"SL ~ {row['stop_loss']:.2f}")
+                    if row.get("note") and row["note"] != "-":
+                        detail.append(row["note"])
+                    if detail:
+                        bullet += " — " + " | ".join(detail)
+                    st.write(bullet)
+
+        # --- Gemini LLM สรุปพอร์ต ---
         st.divider()
         st.subheader("🧠 AI สรุปพอร์ต (Gemini)")
         if st.button("สร้างสรุป"):
             result = summarize_portfolio_with_gemini(pf, model_name=gemini_model)
             st.write(result)
 
+        # --- ข่าว/โน้ตที่ผู้ใช้พิมพ์เอง + Gemini ---
         st.divider()
         st.subheader("📰 ข่าว + 🤖 AI วิเคราะห์ DCA (พิมพ์ข่าวเองได้)")
         user_news_text = st.text_area("สรุปข่าว/โพสต์/ตัวเลขเทคนิค (พิมพ์เองได้ เช่น 'KTB: กำไร Q2 โต 12% | RSI ~45 | EMA20 > EMA50')", height=140)
