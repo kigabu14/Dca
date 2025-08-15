@@ -416,7 +416,7 @@ def summarize_portfolio_with_gemini(portfolio_df: pd.DataFrame, model_name="gemi
         return "⚠️ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน st.secrets หรือ ENV"
     try:
         data = portfolio_df.to_dict(orient="records")
-        prompt = """
+        prompt = ("
         คุณคือผู้ช่วยนักวิเคราะห์การลงทุนแนว DCA ที่ทำงานตามข้อมูลจริง ไม่มโน ไม่เดา
         ให้คำแนะนำที่สอดคล้องกับวินัยการลงทุนและความเสี่ยง โดยใช้เฉพาะข้อมูลที่ให้เท่านั้น
 
@@ -446,7 +446,7 @@ def summarize_portfolio_with_gemini(portfolio_df: pd.DataFrame, model_name="gemi
         - ถ้าข้อมูลไม่เพียงพอให้ระบุว่า 'ไม่มีข้อมูลเพียงพอ'
         - ห้ามรับรองผลตอบแทน
         - ให้ bullet กระชับ ชัดเจน เป็นภาษาไทย
-        """
+        ")
         model = genai.GenerativeModel(model_name)
         res = model.generate_content(prompt)
         return res.text
