@@ -10,7 +10,8 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from passlib.hash import bcrypt
 
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 # ---------------- App Config ----------------
 st.set_page_config(page_title="Plug2Plug DCA Pro", page_icon="🧠", layout="wide")
@@ -562,6 +563,10 @@ def app_screen():
                     st.error("กรุณาใส่ตัวเลข id ที่ถูกต้อง")
 
     with tab1:
+        st.subheader("🧠 AI สรุปพอร์ต (Gemini)")
+            if st.button("สร้างสรุป"):
+                result = summarize_portfolio_with_gemini(portfolio_df)
+                st.write(result)
         st.subheader("สรุปพอร์ตของฉัน")
         pf = portfolio_summary(st.session_state.user_id)
         st.dataframe(
