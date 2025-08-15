@@ -333,7 +333,114 @@ def telegram_notify(bot_token: str, chat_id: str, message: str):
         return r.status_code, r.text[:200]
     except Exception as e:
         return -1, str(e)
+# -------- Programmatic Portfolio Analyzer (no-LLM) --------
+def programmatic_signal(avg_cost: float, hist: pd.DataFrame):
+    """
+    คืน dict: {last, trend, rsi, atr, action, entry_note, stop_loss, reason}
+    กติกา:
+      - ขาขึ้น: Close>SMA20>SMA50 & EMA20>EMA50
+      - โซนถัว: last <= avg_cost*0.95
+      - stop loss: min(SMA50*0.97, last - 2*ATR)
+    """
+    if hist is None or hist.empty or avg_cost <= 0:
+        return {"last": np.nan, "trend":"-", "rsi": np.nan, "atr": np.nan,
+                "action":"HOLD", "entry_note":"ข้อมูลไม่พอ", "stop_loss": None, "reason":"no data"}
 
+    df = hist.copy()
+    df["SMA20"] = sma(df["Close"], 20)
+    df["SMA50"] = sma(df["Close"], 50)
+    df["EMA20"] = ema(df["Close"], 20)
+    df["EMA50"] = ema(df["Close"], 50)
+    df["RSI14"] = rsi(df["Close"], 14)
+    df["ATR14"] = atr(df, 14)
+
+    last = float(df["Close"].iloc[-1])
+    s20, s50 = float(df["SMA20"].iloc[-1]), float(df["SMA50"].iloc[-1])
+    e20, e50 = float(df["EMA20"].iloc[-1]), float(df["EMA50"].iloc[-1])
+    r14 = float(df["RSI14"].iloc[-1])
+    a14 = float(df["ATR14"].iloc[-1]) if not np.isnan(df["ATR14"].iloc[-1]) else 0.0
+
+    up_trend = (last > s20) and (s20 > s50) and (e20 > e50)
+    trend = "UP" if up_trend else "DOWN/NEUTRAL"
+
+    entry_note = "-"
+    action = "HOLD"
+    reason = []
+
+    # โซนเข้า/ถัว
+    if last <= avg_cost * 0.95:
+        action = "BUY (DCA)"
+        entry_note = f"ต่ำกว่าทุน ~{(avg_cost-last)/avg_cost*100:.1f}%"
+        reason.append("ราคาต่ำกว่าทุนเฉลี่ย")
+    elif up_trend and 40 <= r14 <= 65:
+        action = "BUY SMALL"
+        entry_note = "ขาขึ้น + RSI กลางๆ"
+        reason.append("โครงสร้างขาขึ้น")
+    elif r14 < 30:
+        action = "WATCHLIST"
+        entry_note = "RSI ต่ำ รอแท่งยืนยัน"
+        reason.append("Oversold")
+
+    # Stop loss เบื้องต้น
+    stop1 = s50 * 0.97 if s50 and not np.isnan(s50) else None
+    stop2 = last - 2*a14 if a14 and a14 > 0 else None
+    stop_candidates = [x for x in [stop1, stop2] if x and x > 0]
+    stop_loss = float(min(stop_candidates)) if stop_candidates else None
+
+    if not up_trend and last < s50:
+        reason.append("ต่ำกว่า SMA50 ระวังโมเมนตัมลง")
+        if action == "HOLD":
+            action = "HOLD/REDUCE"
+
+    return {
+        "last": last, "trend": trend, "rsi": r14, "atr": a14,
+        "action": action, "entry_note": entry_note, "stop_loss": stop_loss,
+        "reason": "; ".join(reason) if reason else "-"
+    }
+
+def analyze_portfolio_programmatic(user_id: int):
+    """
+    วิ่งทุกตัวในพอร์ต → คำนวณ avg_cost จากดีลจริง, โหลดกราฟ 6 เดือน,
+    คืน DataFrame คำแนะนำแบบโปรแกรม (เข้า/ถัว/ถือ/ลด/SL)
+    """
+    with engine.begin() as conn:
+        raw = pd.read_sql(
+            text("SELECT symbol, market, qty, price FROM trades WHERE user_id=:uid"),
+            conn, params={"uid": user_id}
+        )
+    if raw.empty:
+        return pd.DataFrame(columns=[
+            "symbol","market","units","avg_cost","last",
+            "trend","RSI14","ATR14","action","entry_note","stop_loss","note"
+        ])
+
+    raw["qty"] = pd.to_numeric(raw["qty"], errors="coerce").fillna(0.0)
+    raw["price"] = pd.to_numeric(raw["price"], errors="coerce").fillna(0.0)
+    raw["cost"] = raw["qty"] * raw["price"]
+
+    grouped = (raw.groupby(["symbol","market"], as_index=False)
+                 .agg(units=("qty","sum"), total_cost=("cost","sum")))
+    grouped["avg_cost"] = np.where(grouped["units"]>0,
+                                   grouped["total_cost"]/grouped["units"], 0.0)
+
+    results = []
+    for _, r in grouped.iterrows():
+        sym, mkt = r["symbol"], r["market"]
+        avg_cost = float(r["avg_cost"])
+        hist = get_hist(sym, mkt, period="6mo", with_hlc=True)
+        sig = programmatic_signal(avg_cost, hist)
+        results.append({
+            "symbol": sym, "market": mkt, "units": float(r["units"]), "avg_cost": avg_cost,
+            "last": sig["last"], "trend": sig["trend"], "RSI14": sig["rsi"], "ATR14": sig["atr"],
+            "action": sig["action"], "entry_note": sig["entry_note"],
+            "stop_loss": sig["stop_loss"], "note": sig["reason"]
+        })
+
+    df = pd.DataFrame(results)
+    num_cols = ["units","avg_cost","last","RSI14","ATR14","stop_loss"]
+    if not df.empty:
+        df[num_cols] = df[num_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    return df.sort_values(["market","symbol"])
 # ----------- Advice & Position Sizing -----------
 def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_month: float, lots: int):
     notes = []
@@ -409,8 +516,15 @@ def summarize_portfolio_with_gemini(portfolio_df: pd.DataFrame, model_name="gemi
         prompt = (
             "คุณคือผู้ช่วยการลงทุนแนว DCA ช่วยสรุปพอร์ตเป็นภาษาไทยแบบกระชับเป็นข้อ ๆ "
             "อธิบาย PnL, Yield-on-Cost, กระแสเงินปันผล (TTM) และชี้เงื่อนไขซื้อ/ถัวแบบมีวินัย "
+            
+            "1. หุ้นตัวไหนควรถัวเพิ่ม ตามกลยุทธ์ DCA พร้อมเหตุผล (เช่น ราคาอยู่ในโซนสะสม, ปัจจัยพื้นฐานยังดี, ข่าวหนุน)"
+            "2. หุ้นตัวไหนควรถือ รอดูต่อ เพราะยังไม่มีสัญญาณชัดเจน"
+            "3. หุ้นตัวไหนควรขายเพื่อตัดขาดทุน พร้อมเหตุผล (เช่น แนวโน้มธุรกิจถดถอย, ข่าวลบ, แนวรับสำคัญหลุด)"
+            "4. เสนอหุ้นตัวใหม่ที่มีแนวโน้มธุรกิจเติบโตและราคาน่าสนใจ เพื่อเป็นตัวเลือกลงทุน"
+            "5. ให้เหตุผลทั้งหมดอย่างกระชับ ชัดเจน อ้างอิงจากข้อมูลจริง ไม่เดา ไม่สร้างข้อมูลเท็จ"
             "ใช้เฉพาะตัวเลขจาก JSON ด้านล่าง ห้ามเดาข้อมูลใหม่ และเตือนความเสี่ยงอย่างย่อ\n\n"
             f"JSON พอร์ต:\n{data}"
+            
         )
         model = genai.GenerativeModel(model_name)
         res = model.generate_content(prompt)
