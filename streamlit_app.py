@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import streamlit as st
+import google.generativeai as genai
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -9,6 +10,8 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from passlib.hash import bcrypt
 
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+genai.configure(api_key=GEMINI_API_KEY)
 # ---------------- App Config ----------------
 st.set_page_config(page_title="Plug2Plug DCA Pro", page_icon="🧠", layout="wide")
 DB_URL = "sqlite:///portfolio_users.db"
@@ -341,7 +344,24 @@ def rule_based_advice(avg_cost: float, last: float, hist: pd.DataFrame, budget_m
 
     notes.append("ตั้งจุดตัดขาดทุนเชิงวินัย (เช่น หลุด SMA50 หรือ 2×ATR ต่ำกว่าจุดเข้า)")
     return action, buy_qty, notes, {"RSI14": float(r14), "ATR14": float(a14), "SMA20": float(s20), "SMA50": float(s50)}
+def summarize_portfolio_with_gemini(portfolio_df, model="gemini-1.5-flash"):
+    summary_text = portfolio_df.to_string(index=False)
 
+    prompt = f"""
+    คุณคือผู้ช่วยการลงทุน ทำหน้าที่สรุปพอร์ตการลงทุนของผู้ใช้เป็นภาษาไทย
+    ข้อมูลพอร์ต:
+    {summary_text}
+
+    ให้คำแนะนำสั้นๆ ว่าควรถัวเพิ่ม ขาย หรือถือ และให้เหตุผล
+    """
+
+    try:
+        model = genai.GenerativeModel(model)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"เกิดข้อผิดพลาด: {e}"
+        
 def try_notify_buy(user_id: int, symbol: str, market: str, action: str, price: float):
     settings = get_user_settings(user_id)
     if not settings or not settings.get("notify_on_buy", 0):
@@ -594,7 +614,7 @@ def app_screen():
             else:
                 text, _ = llm_summary_portfolio(pf, st.session_state.username, llm_model, llm_key_input)
                 st.write(text)
-
+         
     with tab3:
         st.subheader(f"ชาร์ต: {symbol.strip().upper()} ({market}) + EMA/RSI/ATR")
         hist = get_hist(symbol.strip().upper(), market, period="1y", with_hlc=True)
