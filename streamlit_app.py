@@ -10,6 +10,10 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from passlib.hash import bcrypt
 
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 # ---------------- App Config ----------------
 st.set_page_config(page_title="Plug2Plug DCA Pro", page_icon="🧠", layout="wide")
 DB_URL = "sqlite:///portfolio_users.db"
