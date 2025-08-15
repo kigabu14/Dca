@@ -574,8 +574,8 @@ def app_screen():
     # เก็บไว้ใช้ทุกแท็บ
     st.session_state["symbol_sel"] = sym
     st.session_state["symbol_custom"] = sym_custom
-    st.session_state["market_sel"] = mkt
-
+    # ห้ามเขียนทับ key widget ให้เก็บเป็น key ใหม่แทน
+    st.session_state["market_current"] = mkt
     st.caption(f"กำลังดู: **{sym} ({mkt})**")
     st.divider()
     # ---------------------------------------------------
